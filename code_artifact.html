@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>復古寶可夢圖鑑對戰 - 平衡重構版</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Custom Retro Styles & Keyframe Animations -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Noto+Sans+TC:wght@500;700;900&display=swap');
+    
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      user-select: none;
+    }
+
+    .pixel-font {
+      font-family: 'Press Start 2P', monospace;
+    }
+
+    /* Pokedex Retro Frame */
+    .pokedex-shell {
+      background: linear-gradient(145deg, #dc2626 0%, #991b1b 100%);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7), inset 0 2px 4px rgba(255, 255, 255, 0.3);
+    }
+
+    .pokedex-screen {
+      background: #111827;
+      border: 4px solid #374151;
+      box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8);
+    }
+
+    /* Battle Animations */
+    @keyframes attack-lunge-player {
+      0% { transform: translate(0, 0); }
+      30% { transform: translate(35px, -20px) scale(1.08); }
+      100% { transform: translate(0, 0); }
+    }
+
+    @keyframes attack-lunge-enemy {
+      0% { transform: translate(0, 0); }
+      30% { transform: translate(-35px, 20px) scale(1.08); }
+      100% { transform: translate(0, 0); }
+    }
+
+    @keyframes hurt-flash {
+      0%, 100% { opacity: 1; filter: none; }
+      25%, 75% { opacity: 0.3; filter: drop-shadow(0 0 8px red); }
+      50% { opacity: 0.9; filter: brightness(2); }
+    }
+
+    @keyframes float-damage {
+      0% { opacity: 1; transform: translateY(0) scale(0.8); }
+      50% { opacity: 1; transform: translateY(-25px) scale(1.2); }
+      100% { opacity: 0; transform: translateY(-40px) scale(1); }
+    }
+
+    .anim-attack-player { animation: attack-lunge-player 0.35s ease-in-out; }
+    .anim-attack-enemy { animation: attack-lunge-enemy 0.35s ease-in-out; }
+    .anim-hurt { animation: hurt-flash 0.4s ease-in-out; }
+    .anim-damage-text { animation: float-damage 0.8s forwards ease-out; }
+
+    /* Custom Scrollbar for Battle Log */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #1f2937; }
+    ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-2 sm:p-4">
+
+  <div class="w-full max-w-4xl pokedex-shell rounded-3xl p-4 sm:p-6 border-4 border-red-900 relative">
+    
+    <!-- Top Pokedex Lights -->
+    <div class="flex items-center space-x-3 mb-4 pb-3 border-b-2 border-red-800">
+      <div class="w-10 h-10 rounded-full bg-cyan-400 border-4 border-white shadow-lg animate-pulse flex items-center justify-center">
+        <div class="w-3 h-3 bg-white rounded-full opacity-70"></div>
+      </div>
+      <div class="flex space-x-2">
+        <div class="w-4 h-4 rounded-full bg-red-500 border border-red-900"></div>
+        <div class="w-4 h-4 rounded-full bg-yellow-400 border border-yellow-900"></div>
+        <div class="w-4 h-4 rounded-full bg-green-500 border border-green-900"></div>
+      </div>
+      <div class="ml-auto flex items-center space-x-2">
+        <button id="soundToggleBtn" onclick="toggleAudio()" class="px-3 py-1 bg-red-900 hover:bg-red-800 text-xs text-yellow-300 rounded font-bold border border-red-700 transition">
+          🔊 音效: 開
+        </button>
+        <span class="text-xs font-bold text-red-200 tracking-wider hidden sm:inline">POKÉDEX V2.5 BALANCED</span>
+      </div>
+    </div>
+
+    <!-- Main Viewport Container -->
+    <div class="pokedex-screen rounded-2xl p-3 sm:p-5 relative overflow-hidden">
+      
+      <!-- Top Navigation Tabs -->
+      <div class="flex border-b border-gray-700 mb-4 text-sm font-bold">
+        <button id="tabBattleBtn" onclick="switchTab('battle')" class="px-4 py-2 text-yellow-400 border-b-2 border-yellow-400 bg-gray-800/50 rounded-t-lg transition flex items-center gap-1">
+          ⚔️ 戰鬥 Arena
+        </button>
+        <button id="tabDexBtn" onclick="switchTab('pokedex')" class="px-4 py-2 text-gray-400 hover:text-gray-200 bg-gray-900/50 rounded-t-lg transition flex items-center gap-1">
+          📖 圖鑑 Pokédex
+        </button>
+        <button id="tabStatsBtn" onclick="switchTab('stats')" class="px-4 py-2 text-gray-400 hover:text-gray-200 bg-gray-900/50 rounded-t-lg transition flex items-center gap-1">
+          🏆 成就/紀錄
+        </button>
+      </div>
+
+      <!-- TAB 1: BATTLE VIEW -->
+      <div id="tabBattle" class="space-y-4">
+        
+        <!-- Opponent & Player Battle Stage Area -->
+        <div class="relative bg-gradient-to-b from-slate-900 via-slate-800 to-emerald-950 rounded-xl p-4 border border-slate-700 min-h-[260px] flex flex-col justify-between overflow-hidden">
+          
+          <!-- Floating Damage Overlay Container -->
+          <div id="damageOverlay" class="absolute inset-0 pointer-events-none z-30 flex items-center justify-center"></div>
+
+          <!-- Opponent HUD & Sprite (Top Right) -->
+          <div class="flex justify-between items-start">
+            <!-- Opponent Status HUD -->
+            <div class="bg-gray-900/90 border border-gray-700 rounded-lg p-2.5 w-48 sm:w-60 shadow-md">
+              <div class="flex justify-between items-center">
+                <span id="enemyName" class="font-bold text-sm text-yellow-300">野生寶可夢</span>
+                <span id="enemyLevel" class="text-xs text-gray-400 font-mono">Lv.50</span>
+              </div>
+              <!-- HP Bar -->
+              <div class="w-full bg-gray-700 rounded-full h-3 mt-1.5 p-0.5 border border-gray-600">
+                <div id="enemyHpBar" class="bg-emerald-500 h-full rounded-full transition-all duration-500 w-full"></div>
+              </div>
+              <div class="flex justify-between text-[11px] text-gray-300 mt-1 font-mono">
+                <span>HP</span>
+                <span id="enemyHpText">150 / 150</span>
+              </div>
+              <!-- Stat Stage Badges -->
+              <div id="enemyStatBadges" class="flex gap-1 mt-1 text-[10px]"></div>
+            </div>
+
+            <!-- Opponent Sprite -->
+            <div id="enemySpriteContainer" class="relative w-28 h-28 sm:w-36 sm:h-36 flex items-center justify-center">
+              <div id="enemySprite" class="w-full h-full flex items-center justify-center transition-transform"></div>
+            </div>
+          </div>
+
+          <!-- Player HUD & Sprite (Bottom Left) -->
+          <div class="flex justify-between items-end mt-2">
+            <!-- Player Sprite -->
+            <div id="playerSpriteContainer" class="relative w-28 h-28 sm:w-36 sm:h-36 flex items-center justify-center">
+              <div id="playerSprite" class="w-full h-full flex items-center justify-center transition-transform"></div>
+            </div>
+
+            <!-- Player Status HUD -->
+            <div class="bg-gray-900/90 border border-gray-700 rounded-lg p-2.5 w-48 sm:w-60 shadow-md">
+              <div class="flex justify-between items-center">
+                <span id="playerName" class="font-bold text-sm text-emerald-400">皮卡丘</span>
+                <span id="playerLevel" class="text-xs text-gray-400 font-mono">Lv.50</span>
+              </div>
+              <!-- HP Bar -->
+              <div class="w-full bg-gray-700 rounded-full h-3 mt-1.5 p-0.5 border border-gray-600">
+                <div id="playerHpBar" class="bg-emerald-500 h-full rounded-full transition-all duration-500 w-full"></div>
+              </div>
+              <div class="flex justify-between text-[11px] text-gray-300 mt-1 font-mono">
+                <span>HP</span>
+                <span id="playerHpText">135 / 135</span>
+              </div>
+              <!-- EXP Bar -->
+              <div class="w-full bg-gray-800 rounded-full h-1.5 mt-1 border border-gray-700">
+                <div id="playerExpBar" class="bg-cyan-400 h-full rounded-full transition-all duration-300 w-0"></div>
+              </div>
+              <!-- Stat Stage Badges -->
+              <div id="playerStatBadges" class="flex gap-1 mt-1 text-[10px]"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls & Actions Section -->
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
+          
+          <!-- Command Buttons Grid (7 cols) -->
+          <div class="md:col-span-7 bg-gray-900 p-3 rounded-xl border border-gray-800 flex flex-col justify-between space-y-2">
+            
+            <!-- Moves Subpanel -->
+            <div id="movesContainer" class="grid grid-cols-2 gap-2">
+              <!-- Dynamically populated 4 move buttons -->
+            </div>
+
+            <!-- Tactical Item & Actions Bar -->
+            <div class="flex items-center justify-between pt-2 border-t border-gray-800 gap-2 text-xs">
+              <div class="flex gap-2">
+                <button onclick="useItem('potion')" id="btnPotion" class="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded font-bold text-white flex items-center gap-1 border border-emerald-500 transition">
+                  🧪 傷藥 (<span id="potionCount">2</span>)
+                </button>
+                <button onclick="useItem('xAttack')" id="btnXAttack" class="px-2.5 py-1.5 bg-amber-700 hover:bg-amber-600 rounded font-bold text-white flex items-center gap-1 border border-amber-500 transition">
+                  ⚡ 攻擊強化 (<span id="xAttackCount">1</span>)
+                </button>
+              </div>
+
+              <div class="flex gap-2">
+                <button onclick="openSwitchModal()" class="px-2.5 py-1.5 bg-indigo-700 hover:bg-indigo-600 rounded font-bold text-white border border-indigo-500 transition">
+                  🔄 換角
+                </button>
+                <button onclick="startNewBattle()" class="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-600 rounded font-bold text-white border border-rose-500 transition">
+                  ⚔️ 下一隻
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Battle Log Dialogue Terminal (5 cols) -->
+          <div class="md:col-span-5 bg-black rounded-xl p-3 border-2 border-gray-700 flex flex-col justify-between h-48 md:h-auto">
+            <div class="text-xs text-yellow-500 font-bold mb-1 pb-1 border-b border-gray-800 flex justify-between">
+              <span>📜 戰鬥日誌 (LOG)</span>
+              <span id="turnCounter" class="text-gray-400">Turn 1</span>
+            </div>
+            <div id="battleLog" class="flex-1 overflow-y-auto space-y-1 text-xs text-gray-200 font-mono pr-1">
+              <!-- Log messages will be inserted here -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- TAB 2: POKÉDEX VIEW -->
+      <div id="tabPokedex" class="hidden space-y-4">
+        <div class="text-sm text-gray-300 flex justify-between items-center bg-gray-900 p-3 rounded-lg border border-gray-800">
+          <span>點擊寶可夢卡片可設為「目前出戰首發」！</span>
+          <span class="text-xs text-yellow-400 font-bold">已收錄 20 隻平衡型寶可夢</span>
+        </div>
+        
+        <!-- Pokedex Cards Grid -->
+        <div id="pokedexGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[480px] overflow-y-auto pr-1">
+          <!-- Dynamically populated 20 Pokemon cards -->
+        </div>
+      </div>
+
+      <!-- TAB 3: STATS & SAVE VIEW -->
+      <div id="tabStats" class="hidden space-y-4">
+        <div class="bg-gray-900 p-4 rounded-xl border border-gray-800 space-y-4">
+          <h3 class="text-base font-bold text-yellow-400 border-b border-gray-800 pb-2">📊 訓練家戰績與數據備份</h3>
+          
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+            <div class="bg-gray-800 p-3 rounded-lg border border-gray-700">
+              <div class="text-xs text-gray-400">對戰總場次</div>
+              <div id="statTotalBattles" class="text-xl font-bold text-white mt-1">0</div>
+            </div>
+            <div class="bg-gray-800 p-3 rounded-lg border border-gray-700">
+              <div class="text-xs text-gray-400">勝場數</div>
+              <div id="statWins" class="text-xl font-bold text-emerald-400 mt-1">0</div>
+            </div>
+            <div class="bg-gray-800 p-3 rounded-lg border border-gray-700">
+              <div class="text-xs text-gray-400">目前勝率</div>
+              <div id="statWinRate" class="text-xl font-bold text-cyan-400 mt-1">0%</div>
+            </div>
+            <div class="bg-gray-800 p-3 rounded-lg border border-gray-700">
+              <div class="text-xs text-gray-400">最高連勝</div>
+              <div id="statMaxStreak" class="text-xl font-bold text-amber-400 mt-1">0</div>
+            </div>
+          </div>
+
+          <div class="bg-gray-800/60 p-3 rounded-lg border border-gray-700 space-y-2">
+            <h4 class="text-xs font-bold text-gray-300">⚖️ 遊戲平衡調整說明：</h4>
+            <ul class="text-xs text-gray-400 space-y-1 list-disc list-inside">
+              <li>**血量與防禦重構成型**：基準 HP 設定為 120~220，單次攻擊傷害占比約 15%~35%，戰鬥節奏約 3~6 回合。</li>
+              <li>**暴擊（擊中要害）**：10% 機率造成 1.5 倍傷害，並忽視對手的防禦階段提升。</li>
+              <li>**戰術變化招**：例如鯉魚王「躍起」直接提升 2 階攻擊力，大幅提高趣味戰術空間！</li>
+              <li>**限制道具系統**：每場限制傷藥 2 次 (+50 HP) 及攻擊強化 1 次 (+2 階攻擊)，防止無限拉鋸。</li>
+            </ul>
+          </div>
+
+          <div class="flex justify-end gap-3 pt-2">
+            <button onclick="resetGameData()" class="px-4 py-2 bg-rose-900 hover:bg-rose-800 text-rose-200 text-xs font-bold rounded border border-rose-700 transition">
+              🗑️ 重置所有遊戲存檔 (Reset)
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Switch Pokemon Modal -->
+  <div id="switchModal" class="fixed inset-0 bg-black/80 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-gray-900 border-2 border-gray-700 rounded-2xl w-full max-w-lg p-4 space-y-3">
+      <div class="flex justify-between items-center border-b border-gray-800 pb-2">
+        <h3 class="font-bold text-sm text-yellow-400">🔄 選擇替換登場的寶可夢</h3>
+        <button onclick="closeSwitchModal()" class="text-gray-400 hover:text-white font-bold text-lg">✕</button>
+      </div>
+      <div id="switchList" class="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto pr-1">
+        <!-- Switchable Pokemon list dynamically populated -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ===================================================================
+       1. WEB AUDIO API RETRO 8-BIT SOUND ENGINE
+       =================================================================== */
+    let audioCtx = null;
+    let isAudioMuted = false;
+
+    function initAudio() {
+      if (!audioCtx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContext();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function toggleAudio() {
+      isAudioMuted = !isAudioMuted;
+      const btn = document.getElementById('soundToggleBtn');
+      btn.innerText = isAudioMuted ? '🔇 音效: 關' : '🔊 音效: 開';
+    }
+
+    function playSound(type) {
+      if (isAudioMuted) return;
+      initAudio();
+      if (!audioCtx) return;
+
+      const now = audioCtx.currentTime;
+
+      if (type === 'attack') {
+        // Square wave noise sweep
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(80, now + 0.15);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.15);
+      } 
+      else if (type === 'critical') {
+        // High pitch sweep + noise
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.linearRampToValueAtTime(880, now + 0.25);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      } 
+      else if (type === 'super_effective') {
+        // Bright 8-bit Arpeggio
+        [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.05);
+          gain.gain.setValueAtTime(0.25, now + idx * 0.05);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.05 + 0.08);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(now + idx * 0.05);
+          osc.stop(now + idx * 0.05 + 0.08);
+        });
+      } 
+      else if (type === 'not_effective') {
+        // Low dull thud
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(120, now);
+        osc.frequency.linearRampToValueAtTime(60, now + 0.18);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.18);
+      } 
+      else if (type === 'potion') {
+        // Rising chime sequence
+        [440, 554.37, 659.25, 880].forEach((freq, idx) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.06);
+          gain.gain.setValueAtTime(0.3, now + idx * 0.06);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.06 + 0.1);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(now + idx * 0.06);
+          osc.stop(now + idx * 0.06 + 0.1);
+        });
+      }
+      else if (type === 'victory') {
+        // Fanfare melody
+        const notes = [
+          {f: 523.25, d: 0.1}, {f: 659.25, d: 0.1}, {f: 783.99, d: 0.1},
+          {f: 1046.50, d: 0.25}, {f: 880, d: 0.12}, {f: 1046.50, d: 0.4}
+        ];
+        let t = now;
+        notes.forEach(note => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(note.f, t);
+          gain.gain.setValueAtTime(0.25, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + note.d);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(t);
+          osc.stop(t + note.d);
+          t += note.d + 0.02;
+        });
+      }
+      else if (type === 'faint') {
+        // Descending pitch
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(50, now + 0.4);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.4);
+      }
+    }
+
+    /* ===================================================================
+       2. TYPE EFFECTIVENESS MATRIX (18 Types)
+       =================================================================== */
+    const TYPES = {
+      Normal: '一般', Fire: '火', Water: '水', Grass: '草', Electric: '電',
+      Ice: '冰', Fighting: '格鬥', Poison: '毒', Ground: '地面', Flying: '飛行',
+      Psychic: '超能力', Bug: '蟲', Rock: '岩石', Ghost: '幽靈', Dragon: '龍',
+      Steel: '鋼', Dark: '惡', Fairy: '妖精'
+    };
+
+    const TYPE_COLORS = {
+      Normal: '#9ca3af', Fire: '#ef4444', Water: '#3b82f6', Grass: '#22c55e', Electric: '#eab308',
+      Ice: '#06b6d4', Fighting: '#f97316', Poison: '#a855f7', Ground: '#d97706', Flying: '#818cf8',
+      Psychic: '#ec4899', Bug: '#84cc16', Rock: '#b45309', Ghost: '#6b21a8', Dragon: '#6366f1',
+      Steel: '#64748b', Dark: '#334155', Fairy: '#f472b6'
+    };
+
+    const TYPE_CHART = {
+      Normal:   { Rock: 0.5, Ghost: 0, Steel: 0.5 },
+      Fire:     { Fire: 0.5, Water: 0.5, Grass: 2, Ice: 2, Bug: 2, Rock: 0.5, Dragon: 0.5, Steel: 2 },
+      Water:    { Fire: 2, Water: 0.5, Grass: 0.5, Ground: 2, Rock: 2, Dragon: 0.5 },
+      Grass:    { Fire: 0.5, Water: 2, Grass: 0.5, Poison: 0.5, Ground: 2, Flying: 0.5, Bug: 0.5, Rock: 2, Dragon: 0.5, Steel: 0.5 },
+      Electric: { Water: 2, Grass: 0.5, Electric: 0.5, Ground: 0, Flying: 2, Dragon: 0.5 },
+      Ice:      { Fire: 0.5, Water: 0.5, Grass: 2, Ice: 0.5, Ground: 2, Flying: 2, Dragon: 2, Steel: 0.5 },
+      Fighting: { Normal: 2, Ice: 2, Poison: 0.5, Flying: 0.5, Psychic: 0.5, Bug: 0.5, Rock: 2, Ghost: 0, Steel: 2, Dark: 2, Fairy: 0.5 },
+      Poison:   { Grass: 2, Poison: 0.5, Ground: 0.5, Rock: 0.5, Ghost: 0.5, Steel: 0, Fairy: 2 },
+      Ground:   { Fire: 2, Grass: 0.5, Electric: 2, Poison: 2, Flying: 0, Bug: 0.5, Rock: 2, Steel: 2 },
+      Flying:   { Grass: 2, Electric: 0.5, Fighting: 2, Bug: 2, Rock: 0.5, Steel: 0.5 },
+      Psychic:  { Fighting: 2, Poison: 2, Psychic: 0.5, Steel: 0.5, Dark: 0 },
+      Bug:      { Fire: 0.5, Grass: 2, Fighting: 0.5, Poison: 0.5, Flying: 0.5, Psychic: 2, Ghost: 0.5, Steel: 0.5, Dark: 2, Fairy: 0.5 },
+      Rock:     { Fire: 2, Ice: 2, Fighting: 0.5, Ground: 0.5, Flying: 2, Bug: 2, Steel: 0.5 },
+      Ghost:    { Normal: 0, Psychic: 2, Ghost: 2, Dark: 0.5 },
+      Dragon:   { Dragon: 2, Steel: 0.5, Fairy: 0 },
+      Steel:    { Fire: 0.5, Water: 0.5, Electric: 0.5, Ice: 2, Rock: 2, Steel: 0.5, Fairy: 2 },
+      Dark:     { Fighting: 0.5, Psychic: 2, Ghost: 2, Dark: 0.5, Fairy: 0.5 },
+      Fairy:    { Fire: 0.5, Fighting: 2, Poison: 0.5, Dragon: 2, Dark: 2, Steel: 0.5 }
+    };
+
+    function getTypeMultiplier(moveType, targetTypes) {
+      let mult = 1.0;
+      targetTypes.forEach(t => {
+        if (TYPE_CHART[moveType] && TYPE_CHART[moveType][t] !== undefined) {
+          mult *= TYPE_CHART[moveType][t];
+        }
+      });
+      return mult;
+    }
+
+    /* ===================================================================
+       3. 20 BALANCED POKÉMON DATABASE & SVG SPRITE GENERATOR
+       =================================================================== */
+    const MOVES_DB = {
+      // Basic / Medium / Ultimate / Status Moves
+      '十萬伏特': { name: '十萬伏特', type: 'Electric', power: 75, acc: 95, pp: 15, category: 'special' },
+      '電光一閃': { name: '電光一閃', type: 'Normal', power: 45, acc: 100, pp: 25, category: 'physical', priority: true },
+      '電磁波': { name: '電磁波', type: 'Electric', power: 0, acc: 90, pp: 20, category: 'status', effect: 'debuff_def' },
+      '伏特攻擊': { name: '伏特攻擊', type: 'Electric', power: 100, acc: 85, pp: 5, category: 'physical' },
+
+      '噴射火焰': { name: '噴射火焰', type: 'Fire', power: 75, acc: 95, pp: 15, category: 'special' },
+      '空氣斬': { name: '空氣斬', type: 'Flying', power: 65, acc: 95, pp: 15, category: 'special' },
+      '龍之波動': { name: '龍之波動', type: 'Dragon', power: 80, acc: 95, pp: 10, category: 'special' },
+      '閃焰衝鋒': { name: '閃焰衝鋒', type: 'Fire', power: 105, acc: 85, pp: 5, category: 'physical' },
+
+      '水砲': { name: '水砲', type: 'Water', power: 95, acc: 80, pp: 5, category: 'special' },
+      '水流尾': { name: '水流尾', type: 'Water', power: 70, acc: 95, pp: 15, category: 'physical' },
+      '縮入殼中': { name: '縮入殼中', type: 'Water', power: 0, acc: 100, pp: 20, category: 'status', effect: 'buff_def_2' },
+      '冰凍光束': { name: '冰凍光束', type: 'Ice', power: 75, acc: 95, pp: 10, category: 'special' },
+
+      '日光束': { name: '日光束', type: 'Grass', power: 110, acc: 85, pp: 5, category: 'special' },
+      '終極吸取': { name: '終極吸取', type: 'Grass', power: 60, acc: 100, pp: 10, category: 'special', drain: 0.5 },
+      '毒粉': { name: '毒粉', type: 'Poison', power: 0, acc: 90, pp: 20, category: 'status', effect: 'debuff_atk' },
+      '地震': { name: '地震', type: 'Ground', power: 90, acc: 90, pp: 10, category: 'physical' },
+
+      // Magikarp Buff Move!
+      '躍起': { name: '躍起', type: 'Normal', power: 0, acc: 100, pp: 30, category: 'status', effect: 'buff_atk_2', desc: '攻擊力大幅提升2階！' },
+      '撞擊': { name: '撞擊', type: 'Normal', power: 40, acc: 100, pp: 30, category: 'physical' },
+      '攀瀑': { name: '攀瀑', type: 'Water', power: 75, acc: 100, pp: 15, category: 'physical' },
+      '龍之怒': { name: '龍之怒', type: 'Dragon', power: 60, acc: 100, pp: 10, category: 'special' },
+
+      '暗影球': { name: '暗影球', type: 'Ghost', power: 75, acc: 100, pp: 15, category: 'special' },
+      '污泥炸彈': { name: '污泥炸彈', type: 'Poison', power: 80, acc: 95, pp: 10, category: 'special' },
+      '奇異光線': { name: '奇異光線', type: 'Ghost', power: 0, acc: 90, pp: 15, category: 'status', effect: 'debuff_def' },
+
+      '逆鱗': { name: '逆鱗', type: 'Dragon', power: 105, acc: 85, pp: 5, category: 'physical' },
+      '神速': { name: '神速', type: 'Normal', power: 70, acc: 100, pp: 10, category: 'physical', priority: true },
+      '龍之舞': { name: '龍之舞', type: 'Dragon', power: 0, acc: 100, pp: 15, category: 'status', effect: 'buff_atk_spd' },
+      '冰凍拳': { name: '冰凍拳', type: 'Ice', power: 70, acc: 100, pp: 15, category: 'physical' },
+
+      '咬碎': { name: '咬碎', type: 'Dark', power: 75, acc: 100, pp: 15, category: 'physical' },
+
+      '精神強念': { name: '精神強念', type: 'Psychic', power: 80, acc: 100, pp: 10, category: 'special' },
+      '波導彈': { name: '波導彈', type: 'Fighting', power: 75, acc: 100, pp: 15, category: 'special' },
+      '冥想': { name: '冥想', type: 'Psychic', power: 0, acc: 100, pp: 20, category: 'status', effect: 'buff_atk_def' },
+
+      '泰山壓頂': { name: '泰山壓頂', type: 'Normal', power: 80, acc: 95, pp: 15, category: 'physical' },
+      '變硬': { name: '變硬', type: 'Normal', power: 0, acc: 100, pp: 25, category: 'status', effect: 'buff_def_2' },
+
+      '爆裂拳': { name: '爆裂拳', type: 'Fighting', power: 90, acc: 80, pp: 5, category: 'physical' },
+      '岩石封鎖': { name: '岩石封鎖', type: 'Rock', power: 60, acc: 90, pp: 15, category: 'physical' },
+      '健美': { name: '健美', type: 'Fighting', power: 0, acc: 100, pp: 20, category: 'status', effect: 'buff_atk_def' },
+      '子彈拳': { name: '子彈拳', type: 'Steel', power: 45, acc: 100, pp: 25, category: 'physical', priority: true },
+
+      '報恩': { name: '報恩', type: 'Normal', power: 70, acc: 100, pp: 20, category: 'physical' },
+      '祈願': { name: '祈願', type: 'Normal', power: 0, acc: 100, pp: 10, category: 'status', effect: 'heal_50' },
+      '幫手': { name: '幫手', type: 'Normal', power: 0, acc: 100, pp: 20, category: 'status', effect: 'buff_atk_2' },
+
+      '巨聲': { name: '巨聲', type: 'Normal', power: 75, acc: 100, pp: 15, category: 'special' },
+      '魔法閃耀': { name: '魔法閃耀', type: 'Fairy', power: 75, acc: 100, pp: 15, category: 'special' },
+
+      '瘋狂伏特': { name: '瘋狂伏特', type: 'Electric', power: 85, acc: 90, pp: 10, category: 'physical' },
+      '咆哮': { name: '咆哮', type: 'Normal', power: 0, acc: 100, pp: 20, category: 'status', effect: 'buff_atk_1' },
+
+      '十字剪': { name: '十字剪', type: 'Bug', power: 75, acc: 100, pp: 15, category: 'physical' },
+      '劍舞': { name: '劍舞', type: 'Normal', power: 0, acc: 100, pp: 15, category: 'status', effect: 'buff_atk_2' },
+
+      '龍爪': { name: '龍爪', type: 'Dragon', power: 75, acc: 100, pp: 15, category: 'physical' },
+
+      '近身戰': { name: '近身戰', type: 'Fighting', power: 100, acc: 85, pp: 5, category: 'physical' },
+
+      '惡之波動': { name: '惡之波動', type: 'Dark', power: 75, acc: 100, pp: 15, category: 'special' },
+      '欺詐': { name: '欺詐', type: 'Dark', power: 80, acc: 100, pp: 15, category: 'physical' },
+
+      '衝浪': { name: '衝浪', type: 'Water', power: 80, acc: 100, pp: 15, category: 'special' }
+    };
+
+    // 20 Balanced Pokémon Database (Base HP: 120-220, Total Stats Balanced)
+    const POKEMON_LIST = [
+      { id: 1, name: '皮卡丘', types: ['Electric'], hp: 135, atk: 85, def: 60, spd: 90, color: '#facc15', moves: ['十萬伏特', '電光一閃', '電磁波', '伏特攻擊'] },
+      { id: 2, name: '噴火龍', types: ['Fire', 'Flying'], hp: 165, atk: 95, def: 75, spd: 85, color: '#f97316', moves: ['噴射火焰', '空氣斬', '龍之波動', '閃焰衝鋒'] },
+      { id: 3, name: '水箭龜', types: ['Water'], hp: 175, atk: 85, def: 100, spd: 70, color: '#3b82f6', moves: ['水砲', '水流尾', '縮入殼中', '冰凍光束'] },
+      { id: 4, name: '妙蛙花', types: ['Grass', 'Poison'], hp: 180, atk: 82, def: 90, spd: 65, color: '#22c55e', moves: ['日光束', '終極吸取', '毒粉', '地震'] },
+      { id: 5, name: '鯉魚王', types: ['Water'], hp: 160, atk: 70, def: 80, spd: 95, color: '#ef4444', moves: ['躍起', '撞擊', '攀瀑', '龍之怒'] },
+      { id: 6, name: '耿鬼', types: ['Ghost', 'Poison'], hp: 140, atk: 100, def: 60, spd: 105, color: '#8b5cf6', moves: ['暗影球', '污泥炸彈', '奇異光線', '十萬伏特'] },
+      { id: 7, name: '快龍', types: ['Dragon', 'Flying'], hp: 185, atk: 105, def: 85, spd: 75, color: '#eab308', moves: ['逆鱗', '神速', '龍之舞', '冰凍拳'] },
+      { id: 8, name: '暴鯉龍', types: ['Water', 'Flying'], hp: 180, atk: 100, def: 80, spd: 75, color: '#2563eb', moves: ['攀瀑', '咬碎', '龍之舞', '地震'] },
+      { id: 9, name: '超夢', types: ['Psychic'], hp: 170, atk: 105, def: 75, spd: 110, color: '#ec4899', moves: ['精神強念', '波導彈', '冥想', '冰凍光束'] },
+      { id: 10, name: '卡比獸', types: ['Normal'], hp: 220, atk: 90, def: 80, spd: 30, color: '#64748b', moves: ['泰山壓頂', '咬碎', '變硬', '地震'] },
+      { id: 11, name: '胡地', types: ['Psychic'], hp: 130, atk: 100, def: 55, spd: 115, color: '#d97706', moves: ['精神強念', '暗影球', '電磁波', '撞擊'] },
+      { id: 12, name: '怪力', types: ['Fighting'], hp: 185, atk: 105, def: 80, spd: 55, color: '#b45309', moves: ['爆裂拳', '岩石封鎖', '健美', '子彈拳'] },
+      { id: 13, name: '伊布', types: ['Normal'], hp: 150, atk: 80, def: 75, spd: 80, color: '#d97706', moves: ['報恩', '祈願', '咬碎', '幫手'] },
+      { id: 14, name: '胖丁', types: ['Normal', 'Fairy'], hp: 210, atk: 65, def: 65, spd: 45, color: '#f472b6', moves: ['巨聲', '毒粉', '魔法閃耀', '變硬'] },
+      { id: 15, name: '風速狗', types: ['Fire'], hp: 175, atk: 95, def: 75, spd: 85, color: '#ea580c', moves: ['神速', '閃焰衝鋒', '瘋狂伏特', '咆哮'] },
+      { id: 16, name: '巨鉗螳螂', types: ['Bug', 'Steel'], hp: 160, atk: 105, def: 95, spd: 60, color: '#dc2626', moves: ['子彈拳', '十字剪', '劍舞', '咬碎'] },
+      { id: 17, name: '烈咬陸鯊', types: ['Dragon', 'Ground'], hp: 180, atk: 105, def: 85, spd: 95, color: '#1e3a8a', moves: ['龍爪', '地震', '岩石封鎖', '劍舞'] },
+      { id: 18, name: '路卡利歐', types: ['Fighting', 'Steel'], hp: 155, atk: 100, def: 70, spd: 90, color: '#0284c7', moves: ['波導彈', '近身戰', '神速', '劍舞'] },
+      { id: 19, name: '月亮伊布', types: ['Dark'], hp: 190, atk: 70, def: 105, spd: 60, color: '#334155', moves: ['惡之波動', '欺詐', '縮入殼中', '祈願'] },
+      { id: 20, name: '拉普拉斯', types: ['Water', 'Ice'], hp: 210, atk: 80, def: 85, spd: 60, color: '#0891b2', moves: ['衝浪', '冰凍光束', '奇異光線', '變硬'] }
+    ];
+
+    // SVG Retro Avatar Generator for visual delight
+    function createPokemonSVG(pkmn) {
+      const color = pkmn.color;
+      return `
+        <svg viewBox="0 0 100 100" class="w-full h-full drop-shadow-lg">
+          <circle cx="50" cy="55" r="32" fill="${color}" stroke="#000" stroke-width="3" />
+          <circle cx="38" cy="48" r="4" fill="#fff" />
+          <circle cx="62" cy="48" r="4" fill="#fff" />
+          <circle cx="39" cy="48" r="2" fill="#000" />
+          <circle cx="63" cy="48" r="2" fill="#000" />
+          <polygon points="50,52 46,58 54,58" fill="#000" />
+          <path d="M 42 63 Q 50 70 58 63" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" />
+          <ellipse cx="28" cy="58" rx="5" ry="3" fill="#f43f5e" opacity="0.8" />
+          <ellipse cx="72" cy="58" rx="5" ry="3" fill="#f43f5e" opacity="0.8" />
+          <path d="M 30 26 L 40 40 L 22 36 Z" fill="${color}" stroke="#000" stroke-width="3" />
+          <path d="M 70 26 L 60 40 L 78 36 Z" fill="${color}" stroke="#000" stroke-width="3" />
+        </svg>
+      `;
+    }
+
+    /* ===================================================================
+       4. GAME STATE MANAGEMENT & STORAGE
+       =================================================================== */
+    let gameState = {
+      playerLevel: 50,
+      playerExp: 0,
+      maxExp: 100,
+      activePlayerId: 1,
+      totalBattles: 0,
+      wins: 0,
+      maxStreak: 0,
+      currentStreak: 0
+    };
+
+    let battleState = {
+      turn: 1,
+      player: null,
+      enemy: null,
+      playerItems: { potion: 2, xAttack: 1 },
+      enemyItems: { potion: 1 },
+      isBusy: false
+    };
+
+    function loadSavedData() {
+      const saved = localStorage.getItem('pokedex_battle_save');
+      if (saved) {
+        try {
+          gameState = { ...gameState, ...JSON.parse(saved) };
+        } catch (e) {
+          console.error('Failed to load save data', e);
+        }
+      }
+      updateStatsUI();
+    }
+
+    function saveData() {
+      localStorage.setItem('pokedex_battle_save', JSON.stringify(gameState));
+      updateStatsUI();
+    }
+
+    function resetGameData() {
+      if (confirm('確定要重置所有訓練家戰績與儲存進度嗎？')) {
+        localStorage.removeItem('pokedex_battle_save');
+        gameState = {
+          playerLevel: 50, playerExp: 0, maxExp: 100,
+          activePlayerId: 1, totalBattles: 0, wins: 0,
+          maxStreak: 0, currentStreak: 0
+        };
+        saveData();
+        startNewBattle();
+        alert('遊戲存檔已重置！');
+      }
+    }
+
+    /* ===================================================================
+       5. CORE BATTLE ENGINE & BALANCED DAMAGE FORMULA
+       =================================================================== */
+    function createBattleInstance(pkmnData, level) {
+      return {
+        ...pkmnData,
+        level: level,
+        maxHp: pkmnData.hp + (level - 50) * 2,
+        currentHp: pkmnData.hp + (level - 50) * 2,
+        atkStage: 0,
+        defStage: 0,
+        spdStage: 0
+      };
+    }
+
+    function getStatMultiplier(stage) {
+      if (stage >= 0) {
+        return (2 + stage) / 2;
+      } else {
+        return 2 / (2 - stage);
+      }
+    }
+
+    /* 
+       MANDATORY CORE BALANCED DAMAGE FORMULA:
+       Damage = (((2 * Level / 5 + 2) * Power * (Atk / Def) / 25) + 2) * TypeMultiplier * Critical * Random(0.85 ~ 1.0)
+    */
+    function calculateDamage(attacker, defender, move) {
+      if (move.power === 0) return { damage: 0, isCrit: false, typeMult: 1.0 };
+
+      const level = attacker.level || 50;
+      const effectiveAtk = attacker.atk * getStatMultiplier(attacker.atkStage);
+      const effectiveDef = defender.def * getStatMultiplier(defender.defStage);
+
+      // Critical Hit Check (10% Chance, 1.5x Multiplier)
+      const isCrit = Math.random() < 0.10;
+      const critMult = isCrit ? 1.5 : 1.0;
+
+      // Type Multiplier
+      const typeMult = getTypeMultiplier(move.type, defender.types);
+
+      // Random Factor (0.85 to 1.0)
+      const randomMult = 0.85 + Math.random() * 0.15;
+
+      // Standard Formula Calculation
+      const baseDamage = (((2 * level / 5 + 2) * move.power * (effectiveAtk / effectiveDef) / 25) + 2);
+      let finalDamage = Math.floor(baseDamage * typeMult * critMult * randomMult);
+
+      // Ensure minimum 1 damage for non-immune attack moves
+      if (typeMult > 0 && finalDamage < 1) finalDamage = 1;
+      if (typeMult === 0) finalDamage = 0;
+
+      return { damage: finalDamage, isCrit, typeMult };
+    }
+
+    /* ===================================================================
+       6. SMART AI DECISION LOGIC
+       =================================================================== */
+    function aiChooseAction() {
+      const enemy = battleState.enemy;
+      const player = battleState.player;
+
+      // 1. Check Low HP & Potion usage (HP < 25%)
+      const hpPercent = enemy.currentHp / enemy.maxHp;
+      if (hpPercent < 0.25 && battleState.enemyItems.potion > 0 && Math.random() < 0.70) {
+        return { type: 'item', item: 'potion' };
+      }
+
+      // 2. Lethal Kill Check (If any move can KO player, use it immediately!)
+      for (let moveName of enemy.moves) {
+        const move = MOVES_DB[moveName];
+        if (move && move.power > 0) {
+          const { damage } = calculateDamage(enemy, player, move);
+          if (damage >= player.currentHp) {
+            return { type: 'move', moveName: moveName };
+          }
+        }
+      }
+
+      // 3. Type Counter & High Damage Preference
+      let bestMove = enemy.moves[0];
+      let maxExpectedDmg = -1;
+
+      enemy.moves.forEach(moveName => {
+        const move = MOVES_DB[moveName];
+        if (!move) return;
+        
+        if (move.category === 'status') {
+          // Tactical use of status move if Atk stage not maxed
+          if (enemy.atkStage < 2 && Math.random() < 0.25) {
+            bestMove = moveName;
+            maxExpectedDmg = 999;
+          }
+        } else {
+          const { damage } = calculateDamage(enemy, player, move);
+          if (damage > maxExpectedDmg) {
+            maxExpectedDmg = damage;
+            bestMove = moveName;
+          }
+        }
+      });
+
+      return { type: 'move', moveName: bestMove };
+    }
+
+    /* ===================================================================
+       7. BATTLE TURN EXECUTION & UI UPDATES
+       =================================================================== */
+    function executePlayerMove(moveName) {
+      if (battleState.isBusy) return;
+      battleState.isBusy = true;
+
+      const player = battleState.player;
+      const enemy = battleState.enemy;
+      const playerMove = MOVES_DB[moveName];
+
+      const aiAction = aiChooseAction();
+
+      // Determine attack order based on Speed and Move Priority
+      let playerFirst = true;
+      if (aiAction.type === 'move') {
+        const enemyMove = MOVES_DB[aiAction.moveName];
+        if (enemyMove.priority && !playerMove.priority) {
+          playerFirst = false;
+        } else if (!enemyMove.priority && playerMove.priority) {
+          playerFirst = true;
+        } else {
+          playerFirst = (player.spd * getStatMultiplier(player.spdStage)) >= (enemy.spd * getStatMultiplier(enemy.spdStage));
+        }
+      }
+
+      if (playerFirst) {
+        performAction(player, enemy, { type: 'move', moveName }, true, () => {
+          if (enemy.currentHp > 0) {
+            setTimeout(() => {
+              performAction(enemy, player, aiAction, false, () => {
+                finishTurn();
+              });
+            }, 600);
+          } else {
+            handleEnemyFaint();
+          }
+        });
+      } else {
+        performAction(enemy, player, aiAction, false, () => {
+          if (player.currentHp > 0) {
+            setTimeout(() => {
+              performAction(player, enemy, { type: 'move', moveName }, true, () => {
+                finishTurn();
+              });
+            }, 600);
+          } else {
+            handlePlayerFaint();
+          }
+        });
+      }
+    }
+
+    function performAction(attacker, defender, action, isPlayer, onComplete) {
+      if (action.type === 'item') {
+        if (action.item === 'potion') {
+          if (isPlayer) battleState.playerItems.potion--;
+          else battleState.enemyItems.potion--;
+
+          const healAmt = 50;
+          attacker.currentHp = Math.min(attacker.maxHp, attacker.currentHp + healAmt);
+          playSound('potion');
+          addLog(`🧪 ${attacker.name} 使用了傷藥，回復了 ${healAmt} HP！`, 'text-emerald-400');
+          updateBattleUI();
+          setTimeout(onComplete, 800);
+        }
+        return;
+      }
+
+      const move = MOVES_DB[action.moveName];
+      addLog(`⚔️ ${attacker.name} 使用了【${move.name}】！`, isPlayer ? 'text-cyan-300' : 'text-rose-300');
+
+      // Play Attack Sprite Animation
+      const spriteId = isPlayer ? 'playerSprite' : 'enemySprite';
+      const animClass = isPlayer ? 'anim-attack-player' : 'anim-attack-enemy';
+      const el = document.getElementById(spriteId);
+      el.classList.add(animClass);
+      setTimeout(() => el.classList.remove(animClass), 400);
+
+      // Accuracy Check
+      if (Math.random() * 100 > move.acc) {
+        setTimeout(() => {
+          playSound('not_effective');
+          addLog(`💨 攻擊沒有命中！`, 'text-gray-400');
+          onComplete();
+        }, 400);
+        return;
+      }
+
+      if (move.category === 'status') {
+        setTimeout(() => {
+          applyStatusEffect(attacker, defender, move, isPlayer);
+          updateBattleUI();
+          onComplete();
+        }, 400);
+      } else {
+        // Calculate Damage
+        const { damage, isCrit, typeMult } = calculateDamage(attacker, defender, move);
+        
+        defender.currentHp = Math.max(0, defender.currentHp - damage);
+
+        setTimeout(() => {
+          // Play Hurt animation
+          const defSpriteId = isPlayer ? 'enemySprite' : 'playerSprite';
+          document.getElementById(defSpriteId).classList.add('anim-hurt');
+          setTimeout(() => document.getElementById(defSpriteId).classList.remove('anim-hurt'), 400);
+
+          // Audio & Log feedback
+          if (isCrit) {
+            playSound('critical');
+            showDamageOverlay('💥 擊中要害！ -' + damage, '#f59e0b');
+            addLog(`💥 擊中要害！造成了 ${damage} 點傷害！`, 'text-amber-400 font-bold');
+          } else if (typeMult > 1.0) {
+            playSound('super_effective');
+            showDamageOverlay('🔥 效果絕佳！ -' + damage, '#ef4444');
+            addLog(`🔥 效果絕佳！造成了 ${damage} 點傷害！`, 'text-rose-400');
+          } else if (typeMult < 1.0 && typeMult > 0) {
+            playSound('not_effective');
+            showDamageOverlay('🛡️ 效果不好 -' + damage, '#9ca3af');
+            addLog(`🛡️ 效果不太好... 造成了 ${damage} 點傷害。`, 'text-gray-400');
+          } else if (typeMult === 0) {
+            playSound('not_effective');
+            addLog(`🚫 對 ${defender.name} 完全沒有效果！`, 'text-gray-500');
+          } else {
+            playSound('attack');
+            showDamageOverlay('-' + damage, '#ffffff');
+            addLog(`造成了 ${damage} 點傷害。`, 'text-gray-200');
+          }
+
+          updateBattleUI();
+
+          // Move Drain Effect
+          if (move.drain && damage > 0) {
+            const heal = Math.floor(damage * move.drain);
+            attacker.currentHp = Math.min(attacker.maxHp, attacker.currentHp + heal);
+            addLog(`🌿 ${attacker.name} 吸收了 ${heal} HP！`, 'text-emerald-400');
+            updateBattleUI();
+          }
+
+          onComplete();
+        }, 400);
+      }
+    }
+
+    function applyStatusEffect(attacker, defender, move, isPlayer) {
+      playSound('potion');
+      if (move.effect === 'buff_atk_2') {
+        attacker.atkStage = Math.min(6, attacker.atkStage + 2);
+        addLog(`✨ ${attacker.name} 的攻擊力大幅提升了！(+2)`, 'text-yellow-300');
+      } else if (move.effect === 'buff_atk_1') {
+        attacker.atkStage = Math.min(6, attacker.atkStage + 1);
+        addLog(`✨ ${attacker.name} 的攻擊力提升了！(+1)`, 'text-yellow-300');
+      } else if (move.effect === 'buff_def_2') {
+        attacker.defStage = Math.min(6, attacker.defStage + 2);
+        addLog(`🛡️ ${attacker.name} 的防禦力大幅提升了！(+2)`, 'text-blue-300');
+      } else if (move.effect === 'buff_atk_def') {
+        attacker.atkStage = Math.min(6, attacker.atkStage + 1);
+        attacker.defStage = Math.min(6, attacker.defStage + 1);
+        addLog(`🧘 ${attacker.name} 的攻擊與防禦力提升了！`, 'text-purple-300');
+      } else if (move.effect === 'buff_atk_spd') {
+        attacker.atkStage = Math.min(6, attacker.atkStage + 1);
+        attacker.spdStage = Math.min(6, attacker.spdStage + 1);
+        addLog(`🐉 ${attacker.name} 跳起了龍之舞，攻擊與速度提升！`, 'text-indigo-300');
+      } else if (move.effect === 'debuff_def') {
+        defender.defStage = Math.max(-6, defender.defStage - 1);
+        addLog(`📉 ${defender.name} 的防禦力降低了！(-1)`, 'text-orange-300');
+      } else if (move.effect === 'debuff_atk') {
+        defender.atkStage = Math.max(-6, defender.atkStage - 1);
+        addLog(`📉 ${defender.name} 的攻擊力降低了！(-1)`, 'text-purple-300');
+      } else if (move.effect === 'heal_50') {
+        attacker.currentHp = Math.min(attacker.maxHp, attacker.currentHp + 50);
+        addLog(`💖 ${attacker.name} 回復了 50 HP！`, 'text-pink-300');
+      }
+    }
+
+    function useItem(itemType) {
+      if (battleState.isBusy) return;
+      if (itemType === 'potion') {
+        if (battleState.playerItems.potion <= 0) return;
+        if (battleState.player.currentHp >= battleState.player.maxHp) {
+          addLog('HP 已滿，無需使用傷藥！', 'text-yellow-400');
+          return;
+        }
+        battleState.isBusy = true;
+        battleState.playerItems.potion--;
+        battleState.player.currentHp = Math.min(battleState.player.maxHp, battleState.player.currentHp + 50);
+        playSound('potion');
+        addLog(`🧪 使用了傷藥，回復 50 HP！`, 'text-emerald-400');
+        updateBattleUI();
+
+        // Enemy Turn after using item
+        setTimeout(() => {
+          const aiAction = aiChooseAction();
+          performAction(battleState.enemy, battleState.player, aiAction, false, () => {
+            finishTurn();
+          });
+        }, 600);
+      } 
+      else if (itemType === 'xAttack') {
+        if (battleState.playerItems.xAttack <= 0) return;
+        battleState.isBusy = true;
+        battleState.playerItems.xAttack--;
+        battleState.player.atkStage = Math.min(6, battleState.player.atkStage + 2);
+        playSound('potion');
+        addLog(`⚡ 使用了攻擊強化！攻擊力大幅提升 2 階！`, 'text-amber-300');
+        updateBattleUI();
+
+        setTimeout(() => {
+          const aiAction = aiChooseAction();
+          performAction(battleState.enemy, battleState.player, aiAction, false, () => {
+            finishTurn();
+          });
+        }, 600);
+      }
+    }
+
+    function finishTurn() {
+      battleState.turn++;
+      document.getElementById('turnCounter').innerText = `Turn ${battleState.turn}`;
+      battleState.isBusy = false;
+    }
+
+    function handleEnemyFaint() {
+      playSound('victory');
+      addLog(`🏆 野生的 ${battleState.enemy.name} 倒下了！獲勝！`, 'text-yellow-400 font-bold');
+      
+      gameState.wins++;
+      gameState.currentStreak++;
+      if (gameState.currentStreak > gameState.maxStreak) {
+        gameState.maxStreak = gameState.currentStreak;
+      }
+      gameState.totalBattles++;
+
+      // Experience Gain
+      const expGained = 45;
+      gameState.playerExp += expGained;
+      addLog(`✨ 獲得了 ${expGained} 點經驗值！`, 'text-cyan-300');
+
+      if (gameState.playerExp >= gameState.maxExp) {
+        gameState.playerLevel++;
+        gameState.playerExp -= gameState.maxExp;
+        gameState.maxExp = Math.floor(gameState.maxExp * 1.2);
+        addLog(`🎉 等級提升到了 Lv.${gameState.playerLevel}！`, 'text-emerald-300 font-bold');
+      }
+
+      saveData();
+      battleState.isBusy = false;
+    }
+
+    function handlePlayerFaint() {
+      playSound('faint');
+      addLog(`💀 ${battleState.player.name} 倒下了... 對戰失敗！`, 'text-rose-500 font-bold');
+      gameState.currentStreak = 0;
+      gameState.totalBattles++;
+      saveData();
+      battleState.isBusy = false;
+    }
+
+    /* ===================================================================
+       8. UI RENDERING & COMPONENT MANAGERS
+       =================================================================== */
+    function updateBattleUI() {
+      const p = battleState.player;
+      const e = battleState.enemy;
+
+      // Player HUD
+      document.getElementById('playerName').innerText = p.name;
+      document.getElementById('playerLevel').innerText = `Lv.${p.level}`;
+      document.getElementById('playerHpText').innerText = `${p.currentHp} / ${p.maxHp}`;
+      const pPct = Math.max(0, (p.currentHp / p.maxHp) * 100);
+      const pBar = document.getElementById('playerHpBar');
+      pBar.style.width = `${pPct}%`;
+      pBar.className = `h-full rounded-full transition-all duration-500 ${pPct > 50 ? 'bg-emerald-500' : pPct > 20 ? 'bg-yellow-500' : 'bg-rose-500'}`;
+      
+      const expPct = Math.min(100, (gameState.playerExp / gameState.maxExp) * 100);
+      document.getElementById('playerExpBar').style.width = `${expPct}%`;
+
+      // Enemy HUD
+      document.getElementById('enemyName').innerText = e.name;
+      document.getElementById('enemyLevel').innerText = `Lv.${e.level}`;
+      document.getElementById('enemyHpText').innerText = `${e.currentHp} / ${e.maxHp}`;
+      const ePct = Math.max(0, (e.currentHp / e.maxHp) * 100);
+      const eBar = document.getElementById('enemyHpBar');
+      eBar.style.width = `${ePct}%`;
+      eBar.className = `h-full rounded-full transition-all duration-500 ${ePct > 50 ? 'bg-emerald-500' : ePct > 20 ? 'bg-yellow-500' : 'bg-rose-500'}`;
+
+      // Sprites
+      document.getElementById('playerSprite').innerHTML = createPokemonSVG(p);
+      document.getElementById('enemySprite').innerHTML = createPokemonSVG(e);
+
+      // Stat Stage Badges
+      renderStatBadges('playerStatBadges', p);
+      renderStatBadges('enemyStatBadges', e);
+
+      // Item Counts
+      document.getElementById('potionCount').innerText = battleState.playerItems.potion;
+      document.getElementById('xAttackCount').innerText = battleState.playerItems.xAttack;
+
+      // Move Buttons
+      renderMoveButtons();
+    }
+
+    function renderStatBadges(containerId, pkmn) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = '';
+      if (pkmn.atkStage !== 0) {
+        const badge = document.createElement('span');
+        badge.className = `px-1 rounded ${pkmn.atkStage > 0 ? 'bg-yellow-600 text-white' : 'bg-blue-600 text-white'}`;
+        badge.innerText = `攻 ${pkmn.atkStage > 0 ? '+' : ''}${pkmn.atkStage}`;
+        container.appendChild(badge);
+      }
+      if (pkmn.defStage !== 0) {
+        const badge = document.createElement('span');
+        badge.className = `px-1 rounded ${pkmn.defStage > 0 ? 'bg-blue-600 text-white' : 'bg-red-600 text-white'}`;
+        badge.innerText = `防 ${pkmn.defStage > 0 ? '+' : ''}${pkmn.defStage}`;
+        container.appendChild(badge);
+      }
+    }
+
+    function renderMoveButtons() {
+      const container = document.getElementById('movesContainer');
+      container.innerHTML = '';
+
+      battleState.player.moves.forEach(moveName => {
+        const move = MOVES_DB[moveName];
+        if (!move) return;
+
+        const btn = document.createElement('button');
+        const typeColor = TYPE_COLORS[move.type] || '#4b5563';
+
+        btn.className = `p-2 rounded-lg text-left border transition flex flex-col justify-between hover:brightness-110 active:scale-95 text-white shadow`;
+        btn.style.backgroundColor = typeColor;
+        btn.onclick = () => executePlayerMove(moveName);
+
+        btn.innerHTML = `
+          <div class="flex justify-between items-center w-full">
+            <span class="font-bold text-xs sm:text-sm">${move.name}</span>
+            <span class="text-[10px] bg-black/40 px-1.5 py-0.5 rounded font-mono">${TYPES[move.type]}</span>
+          </div>
+          <div class="flex justify-between items-center text-[10px] mt-1 text-white/90 font-mono">
+            <span>威力: ${move.power > 0 ? move.power : '-'}</span>
+            <span>命中: ${move.acc}%</span>
+          </div>
+        `;
+        container.appendChild(btn);
+      });
+    }
+
+    function addLog(msg, colorClass = 'text-gray-200') {
+      const logBox = document.getElementById('battleLog');
+      const item = document.createElement('div');
+      item.className = `leading-snug ${colorClass}`;
+      item.innerHTML = msg;
+      logBox.appendChild(item);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function showDamageOverlay(text, color) {
+      const overlay = document.getElementById('damageOverlay');
+      const el = document.createElement('div');
+      el.className = 'anim-damage-text font-black text-xl sm:text-2xl drop-shadow-md';
+      el.style.color = color;
+      el.innerText = text;
+      overlay.appendChild(el);
+      setTimeout(() => el.remove(), 800);
+    }
+
+    function startNewBattle() {
+      const playerBase = POKEMON_LIST.find(p => p.id === gameState.activePlayerId) || POKEMON_LIST[0];
+      
+      // Random enemy except player's current mon
+      const otherMons = POKEMON_LIST.filter(p => p.id !== playerBase.id);
+      const enemyBase = otherMons[Math.floor(Math.random() * otherMons.length)];
+
+      battleState = {
+        turn: 1,
+        player: createBattleInstance(playerBase, gameState.playerLevel),
+        enemy: createBattleInstance(enemyBase, gameState.playerLevel),
+        playerItems: { potion: 2, xAttack: 1 },
+        enemyItems: { potion: 1 },
+        isBusy: false
+      };
+
+      document.getElementById('battleLog').innerHTML = '';
+      addLog(`⚔️ 遇到了野生的 ${battleState.enemy.name}！`, 'text-yellow-400 font-bold');
+      document.getElementById('turnCounter').innerText = 'Turn 1';
+
+      updateBattleUI();
+    }
+
+    function renderPokedexGrid() {
+      const grid = document.getElementById('pokedexGrid');
+      grid.innerHTML = '';
+
+      POKEMON_LIST.forEach(pkmn => {
+        const isSelected = pkmn.id === gameState.activePlayerId;
+        const card = document.createElement('div');
+        card.className = `p-2.5 rounded-xl border transition cursor-pointer flex flex-col items-center justify-between relative ${
+          isSelected ? 'bg-yellow-900/40 border-yellow-400 ring-2 ring-yellow-400' : 'bg-gray-800/80 border-gray-700 hover:border-gray-500'
+        }`;
+        card.onclick = () => {
+          gameState.activePlayerId = pkmn.id;
+          saveData();
+          renderPokedexGrid();
+          startNewBattle();
+          switchTab('battle');
+        };
+
+        const typeBadges = pkmn.types.map(t => `<span class="text-[9px] px-1.5 py-0.5 rounded text-white font-mono" style="background-color:${TYPE_COLORS[t]}">${TYPES[t]}</span>`).join(' ');
+
+        card.innerHTML = `
+          ${isSelected ? '<span class="absolute top-1 right-1 text-[9px] bg-yellow-400 text-black px-1 font-bold rounded">首發</span>' : ''}
+          <div class="w-16 h-16 my-1">${createPokemonSVG(pkmn)}</div>
+          <div class="text-xs font-bold text-center text-gray-100 mt-1">${pkmn.name}</div>
+          <div class="flex gap-1 mt-1">${typeBadges}</div>
+          <div class="text-[10px] text-gray-400 mt-1 font-mono">HP:${pkmn.hp} 攻:${pkmn.atk} 防:${pkmn.def}</div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function openSwitchModal() {
+      if (battleState.isBusy) return;
+      const list = document.getElementById('switchList');
+      list.innerHTML = '';
+
+      POKEMON_LIST.forEach(pkmn => {
+        if (pkmn.id === battleState.player.id) return;
+
+        const row = document.createElement('div');
+        row.className = 'p-2 bg-gray-800 hover:bg-gray-700 rounded-lg flex items-center justify-between cursor-pointer border border-gray-700';
+        row.onclick = () => {
+          closeSwitchModal();
+          battleState.isBusy = true;
+          const oldName = battleState.player.name;
+          battleState.player = createBattleInstance(pkmn, gameState.playerLevel);
+          gameState.activePlayerId = pkmn.id;
+          saveData();
+
+          playSound('potion');
+          addLog(`🔄 回來吧 ${oldName}！上吧 ${battleState.player.name}！`, 'text-cyan-300 font-bold');
+          updateBattleUI();
+
+          setTimeout(() => {
+            const aiAction = aiChooseAction();
+            performAction(battleState.enemy, battleState.player, aiAction, false, () => {
+              finishTurn();
+            });
+          }, 600);
+        };
+
+        row.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10">${createPokemonSVG(pkmn)}</div>
+            <div>
+              <div class="text-xs font-bold text-white">${pkmn.name}</div>
+              <div class="text-[10px] text-gray-400">HP: ${pkmn.hp} | 攻: ${pkmn.atk} | 防: ${pkmn.def}</div>
+            </div>
+          </div>
+          <button class="px-2.5 py-1 bg-yellow-500 text-black font-bold text-xs rounded">登場</button>
+        `;
+        list.appendChild(row);
+      });
+
+      document.getElementById('switchModal').classList.remove('hidden');
+    }
+
+    function closeSwitchModal() {
+      document.getElementById('switchModal').classList.add('hidden');
+    }
+
+    function switchTab(tab) {
+      document.getElementById('tabBattle').classList.add('hidden');
+      document.getElementById('tabPokedex').classList.add('hidden');
+      document.getElementById('tabStats').classList.add('hidden');
+
+      document.getElementById('tabBattleBtn').className = 'px-4 py-2 text-gray-400 hover:text-gray-200 bg-gray-900/50 rounded-t-lg transition flex items-center gap-1';
+      document.getElementById('tabDexBtn').className = 'px-4 py-2 text-gray-400 hover:text-gray-200 bg-gray-900/50 rounded-t-lg transition flex items-center gap-1';
+      document.getElementById('tabStatsBtn').className = 'px-4 py-2 text-gray-400 hover:text-gray-200 bg-gray-900/50 rounded-t-lg transition flex items-center gap-1';
+
+      if (tab === 'battle') {
+        document.getElementById('tabBattle').classList.remove('hidden');
+        document.getElementById('tabBattleBtn').className = 'px-4 py-2 text-yellow-400 border-b-2 border-yellow-400 bg-gray-800/50 rounded-t-lg transition flex items-center gap-1';
+      } else if (tab === 'pokedex') {
+        document.getElementById('tabPokedex').classList.remove('hidden');
+        document.getElementById('tabDexBtn').className = 'px-4 py-2 text-yellow-400 border-b-2 border-yellow-400 bg-gray-800/50 rounded-t-lg transition flex items-center gap-1';
+        renderPokedexGrid();
+      } else if (tab === 'stats') {
+        document.getElementById('tabStats').classList.remove('hidden');
+        document.getElementById('tabStatsBtn').className = 'px-4 py-2 text-yellow-400 border-b-2 border-yellow-400 bg-gray-800/50 rounded-t-lg transition flex items-center gap-1';
+        updateStatsUI();
+      }
+    }
+
+    function updateStatsUI() {
+      document.getElementById('statTotalBattles').innerText = gameState.totalBattles;
+      document.getElementById('statWins').innerText = gameState.wins;
+      const rate = gameState.totalBattles > 0 ? Math.round((gameState.wins / gameState.totalBattles) * 100) : 0;
+      document.getElementById('statWinRate').innerText = `${rate}%`;
+      document.getElementById('statMaxStreak').innerText = gameState.maxStreak;
+    }
+
+    window.onload = function() {
+      loadSavedData();
+      startNewBattle();
+    };
+  </script>
+</body>
+</html>
